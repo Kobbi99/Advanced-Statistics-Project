@@ -1,0 +1,535 @@
+---
+title: "24001518_Doreen"
+author: "Doreen"
+format: docx
+prefer-html: true
+editor: visual
+---
+
+## Data Preparation
+
+#### 1. Installing packages and Loading of libraries
+
+```{r Import Libraries, echo=FALSE, include=FALSE}
+# Install necessary packages if not installed
+#install.packages("dplyr")
+#install.packages("ggplot2")
+#install.packages("plotly")
+#install.packages("tibble")
+#install.packages("tidyr")
+#install.packages("caret")
+#install.packages("nnet")
+#install.packages("randomForest")
+#install.packages("e1071")
+#install.packages("corrplot")
+#install.packages("cluster")
+#install.packages("ggfortify")
+#install.packages("RColorBrewer")
+#install.packages("reshape2")
+#install.packages("Metrics")
+#install.packages("pheatmap")
+
+# Load the libraries
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(tibble)  # For `rowid_to_column()
+library(tidyr)
+library(caret)
+library(nnet)
+library(randomForest)
+library("e1071")
+library(corrplot)
+library(cluster)
+library(ggfortify)
+library(RColorBrewer)
+library(reshape2)
+library(Metrics)
+library(pheatmap)
+```
+
+```{r Reading the csv}
+#Read the csv file
+Xdata <- read.csv("Data.csv")
+```
+
+#### 2. Summary Statistics
+
+```{r Summary Statistics}
+head(Xdata)
+str(Xdata)
+```
+
+```{r Summary(contd.)}
+summary(Xdata)
+```
+
+```{r Label Data}
+table(Xdata$label)
+```
+
+```{r Checking for Duplicates}
+#Checking for duplicates
+duplicates <- sum(duplicated(Xdata))  # Count duplicates
+print(duplicates)
+```
+
+```{r Checking for Missing Values}
+#Checking for missing values
+missing_values <- colSums(is.na(Xdata))  # Count missing values for each column
+print(missing_values)
+```
+
+#### 3. Missing values and Outlier Handling
+
+```{r Removal of Missing Values and Outliers}
+#Remove missing values
+numerical_columns <- names(Xdata)[sapply(Xdata, is.numeric)]
+for (col in numerical_columns) {
+  Xdata[[col]][is.na(Xdata[[col]])] <- median(Xdata[[col]], na.rm = TRUE)
+}
+
+# Get categorical columns
+categorical_columns <- names(Xdata)[sapply(Xdata, is.factor)]  # Get categorical columns
+
+# Impute missing values with the mode (most frequent category)
+for (col in categorical_columns) {
+  mode_value <- names(sort(table(Xdata[[col]]), decreasing = TRUE))[1]
+  Xdata[[col]][is.na(Xdata[[col]])] <- mode_value
+}
+
+# Remove outliers based on the IQR method
+remove_outliers <- function(Xdata) {
+  # Get numerical columns
+  numerical_columns <- names(Xdata)[sapply(Xdata, is.numeric)]  # Get numerical columns
+  
+  Xdata_cleaned <- Xdata %>%
+    mutate(across(all_of(numerical_columns), ~ {
+      Q1 <- quantile(.x, 0.25, na.rm = TRUE)
+      Q3 <- quantile(.x, 0.75, na.rm = TRUE)
+      IQR <- Q3 - Q1
+      
+      lower_bound <- Q1 - 1.5 * IQR
+      upper_bound <- Q3 + 1.5 * IQR
+      
+      # Replace outliers with NA
+      .x[.x < lower_bound | .x > upper_bound] <- NA
+      .x  # Return the modified column with outliers replaced by NA
+    }))
+  
+  return(Xdata_cleaned)
+}
+
+# Apply the function to remove outliers
+Xdata_cleaned_no_outliers <- remove_outliers(Xdata)
+
+#Remove rows with missing values (after outlier removal)
+Xdata_cleaned_no_na <- na.omit(Xdata_cleaned_no_outliers)
+
+# Save the cleaned data to a new CSV file
+write.csv(Xdata_cleaned_no_na, "Xdata_cleaned_no_outliers.csv", row.names = FALSE)
+
+#Display the cleaned data (first few rows)
+head(Xdata_cleaned_no_na)
+```
+
+```{r Save the cleaned data to a new CSV file}
+# Save the cleaned data to a new CSV file locally on your machine
+write.csv(Xdata_cleaned_no_na, "Xdata_cleaned_no_outliers.csv", row.names = FALSE)
+```
+
+## EDA
+
+#### 1. Histograms of the dataset;
+
+```{r Histograms of the Dataset, echo=FALSE,include=TRUE}
+# Get numerical columns in the dataset
+numerical_columns <- names(Xdata_cleaned_no_na)[sapply(Xdata_cleaned_no_na, is.numeric)]
+
+# Reshape the data to long format for ggplot
+Xdata_long <- Xdata_cleaned_no_na %>%
+  pivot_longer(cols = numerical_columns, names_to = "Variable", values_to = "Value")
+
+# 1. Create Histograms, with different colors for each label
+gg_hist <- ggplot(Xdata_long, aes(x = Value, fill = label)) +  # Color by label
+  geom_histogram(bins = 30, color = "black", alpha = 0.7) +  # Black border around bars
+  facet_wrap(~ Variable, scales = "free_x") +  # Separate histograms for each variable
+  labs(title = "Histograms of Numerical Variables by Label", x = "Value", y = "Frequency") +
+  theme_minimal() +
+  scale_fill_manual(values = c("skyblue", "orange", "green", "purple")) +  # Manually set colors for labels
+  theme(legend.title = element_blank())  # Remove legend title for better appearance
+
+# Save the histogram as a PNG image
+ggsave("histograms_by_label.png", gg_hist, width = 10, height = 8, dpi = 300)
+
+# Display the plot
+gg_hist
+```
+
+#### 2. Boxplots of the dataset;
+
+```{r Boxplots of the Dataset,echo=FALSE,include=TRUE}
+# Get numerical columns in the dataset
+numerical_columns <- names(Xdata_cleaned_no_na)[sapply(Xdata_cleaned_no_na, is.numeric)]
+
+# Reshape the data to long format for ggplot (necessary for facet_wrap)
+Xdata_long <- Xdata_cleaned_no_na %>%
+  pivot_longer(cols = numerical_columns, names_to = "Variable", values_to = "Value")
+
+# Create clear and well-styled boxplots using ggplot2
+gg_boxplots <- ggplot(Xdata_long, aes(x = Variable, y = Value, fill = Variable)) +
+  geom_boxplot(alpha = 0.7, color = "black", fill = "orange") +  # Black borders and light blue fill
+  labs(title = "Boxplots of Numerical Variables", x = "Variable", y = "Value") +
+  theme_minimal(base_size = 15) +  # Clean theme with increased font size
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    strip.text = element_text(size = 14, face = "bold"),  # Bold facet labels
+    axis.title = element_text(size = 12, face = "bold"),  # Bold axis titles
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5)  # Bold and centered plot title
+  )
+
+# Display the ggplot boxplots
+gg_boxplots
+```
+
+#### 3. A Heat Map of the dataset
+
+```{r A heat map of the dataset}
+# 1. Calculate the correlation matrix for numerical columns
+cor_matrix <- cor(Xdata_cleaned_no_na[numerical_columns], use = "complete.obs")  # Only numerical columns
+
+# 2. Melt the correlation matrix to long format (required for ggplot)
+cor_matrix_melted <- melt(cor_matrix)
+
+# 3. Create the heatmap using ggplot2 with grid lines and display numbers in each tile
+gg_heatmap <- ggplot(cor_matrix_melted, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white", size = 0.2) +  # Add white gridlines between the tiles
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +  # Blue for negative, red for positive
+  labs(title = "Correlation Heatmap of Numerical Variables", x = "Variables", y = "Variables") +
+  theme_minimal(base_size = 15) +  # Minimal theme with larger font size
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 10),  # Increase y-axis text size
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),  # Bold and centered title
+    panel.grid = element_blank(),  # Remove the background grid
+    panel.border = element_rect(color = "black", fill = NA, size = 1)  # Add border to the plot
+  ) +
+  # Add numbers inside each tile
+  geom_text(aes(label = sprintf("%.2f", value)), color = "black", size = 3)  # Format to 2 decimal places
+
+# 4. Show the heatmap
+gg_heatmap
+```
+
+## Supervised Learning
+
+### 1. Split the data into training and testing datasets
+
+```{r Splitting the data}
+# Split the data into training and testing sets
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(Xdata_cleaned_no_na$label, p = 0.8, list = FALSE)
+train_data <- Xdata_cleaned_no_na[train_index, ]
+test_data <- Xdata_cleaned_no_na[-train_index, ]
+
+# Ensure that the 'label' column has the same factor levels in both train and test data
+train_data$label <- factor(train_data$label)
+test_data$label <- factor(test_data$label, levels = levels(train_data$label))
+
+# Check the structure of train and test data
+str(train_data)
+str(test_data)
+```
+
+### 2. Apply Multinomial Logistic Regression
+
+```{r Multinomial Logistic Regression}
+# Fit the Multinomial Logistic Regression Model
+multinom_model <- multinom(label ~ ., data = train_data)
+
+# Summary of the model
+summary(multinom_model)
+
+# Predict on Test Data
+multinom_predictions <- predict(multinom_model, newdata = test_data)
+
+# Evaluate model performance using confusion matrix
+multinom_confusion_matrix <- confusionMatrix(multinom_predictions, test_data$label)
+print(multinom_confusion_matrix)
+
+#Display the confusion matrix graph
+pheatmap(multinom_confusion_matrix,
+  display_numbers = TRUE,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_number = 12)
+```
+
+### 3. Generation of bootstrap samples from the training data to simulate new datasets
+
+```{r Bootstrap Sampling}
+# Function for bootstrap sampling (resampling with replacement)
+bootstrap_sample <- function(data, n) {
+  sample_indices <- sample(1:nrow(data), size = n, replace = TRUE)
+  return(data[sample_indices, ])
+}
+
+# Number of bootstrap samples
+num_bootstrap_samples <- 20  # You can adjust this number
+bootstrap_results <- list()
+
+for (i in 1:num_bootstrap_samples) {
+  # Generate a bootstrap sample
+  bootstrap_data <- bootstrap_sample(train_data, nrow(train_data))
+  
+  # Save the bootstrap sample to a CSV file
+  write.csv(bootstrap_data, paste0("bootstrap_sample", i, ".csv"), row.names = FALSE)
+  
+  # Fit Multinomial Logistic Regression on Bootstrap Sample
+  multinom_model_bootstrap <- multinom(label ~ ., data = bootstrap_data)
+  
+  # Predict on test data
+  multinom_predictions_bootstrap <- predict(multinom_model_bootstrap, newdata = test_data)
+  
+  # Evaluate performance
+  confusion_matrix_bootstrap <- confusionMatrix(multinom_predictions_bootstrap, test_data$label)
+  
+  # Store the confusion matrix for this bootstrap sample
+  bootstrap_results[[i]] <- confusion_matrix_bootstrap
+}
+
+#Display the confusion matrix graph
+pheatmap(confusion_matrix_bootstrap,
+  display_numbers = TRUE,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_number = 12)
+```
+
+### 4. Random Forest Model on both Original and Simulated Data
+
+```{r Random Forest}
+# Fit Random Forest Model to Original Data
+rf_model <- randomForest(label ~ ., data = train_data)
+
+# Predict on Test Data
+rf_predictions <- predict(rf_model, newdata = test_data)
+
+# Evaluate performance using confusion matrix
+rf_confusion_matrix <- confusionMatrix(rf_predictions, test_data$label)
+print(rf_confusion_matrix)
+
+# Bootstrap sampling for Random Forest
+rf_bootstrap_results <- list()
+
+for (i in 1:num_bootstrap_samples) {
+  # Generate a bootstrap sample
+  bootstrap_data <- bootstrap_sample(train_data, nrow(train_data))
+  
+  # Fit Random Forest on Bootstrap Sample
+  rf_model_bootstrap <- randomForest(label ~ ., data = bootstrap_data)
+  rf_predictions_bootstrap <- predict(rf_model_bootstrap, newdata = test_data)
+  rf_confusion_matrix_bootstrap <- confusionMatrix(rf_predictions_bootstrap, test_data$label)
+  
+  # Store results
+  rf_bootstrap_results[[i]] <- rf_confusion_matrix_bootstrap
+}
+
+#Display the confusion matrix graph
+pheatmap(rf_confusion_matrix_bootstrap,
+  display_numbers = TRUE,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_number = 12)
+```
+
+### 5. Support Vector Machine Model on Original and Simulated Data
+
+```{r SVM}
+# Fit SVM Model to Original Data
+svm_model <- svm(label ~ ., data = train_data)
+
+# Predict on Test Data
+svm_predictions <- predict(svm_model, newdata = test_data)
+
+# Evaluate model performance using confusion matrix
+svm_confusion_matrix <- confusionMatrix(svm_predictions, test_data$label)
+print(svm_confusion_matrix)
+
+# Bootstrap sampling for SVM
+svm_bootstrap_results <- list()
+
+for (i in 1:num_bootstrap_samples) {
+  # Generate a bootstrap sample
+  bootstrap_data <- bootstrap_sample(train_data, nrow(train_data))
+  
+  # Fit SVM on Bootstrap Sample
+  svm_model_bootstrap <- svm(label ~ ., data = bootstrap_data)
+  svm_predictions_bootstrap <- predict(svm_model_bootstrap, newdata = test_data)
+  svm_confusion_matrix_bootstrap <- confusionMatrix(svm_predictions_bootstrap, test_data$label)
+  
+  # Store results
+  svm_bootstrap_results[[i]] <- svm_confusion_matrix_bootstrap
+}
+
+#Display the confusion matrix graph
+pheatmap(svm_confusion_matrix_bootstrap,
+  display_numbers = TRUE,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_number = 12)
+```
+
+### 6. Evaluation of Model Performance - Random Forest and SVM
+
+```{r  Evaluation of Model Performance}
+# Evaluate Random Forest across bootstrap samples
+rf_accuracies <- sapply(rf_bootstrap_results, function(res) res$overall['Accuracy'])
+avg_rf_accuracy <- mean(rf_accuracies)
+std_rf_accuracy <- sd(rf_accuracies)
+
+cat("Average Accuracy for Random Forest across Bootstrap Samples: ", avg_rf_accuracy, "\n")
+cat("Standard Deviation of Accuracy for Random Forest: ", std_rf_accuracy, "\n")
+
+# Evaluate SVM across bootstrap samples
+svm_accuracies <- sapply(svm_bootstrap_results, function(res) res$overall['Accuracy'])
+avg_svm_accuracy <- mean(svm_accuracies)
+std_svm_accuracy <- sd(svm_accuracies)
+
+cat("Average Accuracy for SVM across Bootstrap Samples: ", avg_svm_accuracy, "\n")
+cat("Standard Deviation of Accuracy for SVM: ", std_svm_accuracy, "\n")
+```
+
+Random Forest outperforms SVM in terms of accuracy with an average accuracy of 89.7%, and its stability across samples is good (low standard deviation of 77.5%) and therefore is a more reliable model for this dataset.
+
+## Unsupervised Learning
+
+### Applying PCA and K-Means on;
+
+#### 1. Original Data
+
+```{r Unsupervised Learning on Original Data}
+# Function for bootstrap sampling (resampling with replacement)
+bootstrap_sample <- function(data, n) {
+  sample_indices <- sample(1:nrow(data), size = n, replace = TRUE)  # Resample with replacement
+  return(data[sample_indices, ])
+}
+
+# 1: Apply PCA and K-means to the Original Data
+
+# Original Data (No feature selection)
+original_data <- Xdata_cleaned_no_na
+
+# Remove Rows with Missing Values
+reduced_data_original <- na.omit(original_data)  # Remove rows with missing values
+
+# Ensure only numeric columns are used
+reduced_data_original <- reduced_data_original[, sapply(reduced_data_original, is.numeric)]
+
+# Check the structure of the data before PCA
+str(reduced_data_original)
+
+# 2: Apply PCA (Principal Component Analysis)
+pca_result_original <- prcomp(reduced_data_original, center = TRUE, scale. = TRUE)
+pca_data_original <- as.data.frame(pca_result_original$x)
+
+# Visualize PCA - Plot the first two principal components for the Original Data
+ggplot(pca_data_original, aes(x = PC1, y = PC2)) +
+  geom_point() +
+  labs(title = "PCA: First Two Principal Components (Original Data)", x = "PC1", y = "PC2")
+
+# 3: Apply K-means Clustering to the Original Data
+set.seed(123)  # For reproducibility
+kmeans_result_original <- kmeans(reduced_data_original, centers = 3, nstart = 25)  # Assuming 3 clusters
+
+# Add cluster results to the PCA data for visualization
+pca_data_original$Cluster <- as.factor(kmeans_result_original$cluster)
+
+# Visualize K-means Clustering results with PCA (Original Data)
+ggplot(pca_data_original, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  labs(title = "K-means Clustering on PCA (Original Data)", x = "PC1", y = "PC2")
+
+
+# Apply PCA and K-means to the Bootstrap Data
+
+# Bootstrap Sampling (Simulated Data)
+bootstrap_data <- bootstrap_sample(Xdata_cleaned_no_na, nrow(Xdata_cleaned_no_na))
+
+# Remove Rows with Missing Values for Bootstrap Data
+reduced_data_bootstrap <- na.omit(bootstrap_data)
+
+# Ensure only numeric columns are used for bootstrap data
+reduced_data_bootstrap <- reduced_data_bootstrap[, sapply(reduced_data_bootstrap, is.numeric)]
+
+# Check the structure of the data before PCA for bootstrap data
+str(reduced_data_bootstrap)
+
+# Apply PCA to the Bootstrap Data
+pca_result_bootstrap <- prcomp(reduced_data_bootstrap, center = TRUE, scale. = TRUE)
+pca_data_bootstrap <- as.data.frame(pca_result_bootstrap$x)
+
+# Visualize PCA - Plot the first two principal components for the Bootstrap Data
+ggplot(pca_data_bootstrap, aes(x = PC1, y = PC2)) +
+  geom_point() +
+  labs(title = "PCA: First Two Principal Components (Bootstrap Data)", x = "PC1", y = "PC2")
+
+# Apply K-means Clustering to the Bootstrap Data
+set.seed(123)  # For reproducibility
+kmeans_result_bootstrap <- kmeans(reduced_data_bootstrap, centers = 3, nstart = 25)  # Assuming 3 clusters
+
+# Add cluster results to the PCA data for visualization
+pca_data_bootstrap$Cluster <- as.factor(kmeans_result_bootstrap$cluster)
+
+# Visualize K-means Clustering results with PCA (Bootstrap Data)
+ggplot(pca_data_bootstrap, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  labs(title = "K-means Clustering on PCA (Bootstrap Data)", x = "PC1", y = "PC2")
+
+```
+
+#### 2. Simulated Data
+
+```{r Unsupervised Learning on Simulated Data}
+# Function for bootstrap sampling (resampling with replacement)
+bootstrap_sample <- function(data, n) {
+  sample_indices <- sample(1:nrow(data), size = n, replace = TRUE)  # Resample with replacement
+  return(data[sample_indices, ])
+}
+
+# 1: Apply PCA and K-means to the Bootstrap Data
+
+# Bootstrap Sampling (Simulated Data)
+bootstrap_data <- bootstrap_sample(Xdata_cleaned_no_na, nrow(Xdata_cleaned_no_na))
+
+# Remove Rows with Missing Values for Bootstrap Data
+reduced_data_bootstrap <- na.omit(bootstrap_data)
+
+# Ensure only numeric columns are used for bootstrap data
+reduced_data_bootstrap <- reduced_data_bootstrap[, sapply(reduced_data_bootstrap, is.numeric)]
+
+# Check the structure of the data before PCA for bootstrap data
+str(reduced_data_bootstrap)
+
+# 2: Apply PCA to the Bootstrap Data
+pca_result_bootstrap <- prcomp(reduced_data_bootstrap, center = TRUE, scale. = TRUE)
+pca_data_bootstrap <- as.data.frame(pca_result_bootstrap$x)
+
+# Visualize PCA - Plot the first two principal components for the Bootstrap Data
+ggplot(pca_data_bootstrap, aes(x = PC1, y = PC2)) +
+  geom_point() +
+  labs(title = "PCA: First Two Principal Components (Bootstrap Data)", x = "PC1", y = "PC2")
+
+# 3: Apply K-means Clustering to the Bootstrap Data
+set.seed(123)  # For reproducibility
+kmeans_result_bootstrap <- kmeans(reduced_data_bootstrap, centers = 3, nstart = 25)  # Assuming 3 clusters
+
+# Add cluster results to the PCA data for visualization
+pca_data_bootstrap$Cluster <- as.factor(kmeans_result_bootstrap$cluster)
+
+# Visualize K-means Clustering results with PCA (Bootstrap Data)
+ggplot(pca_data_bootstrap, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point() +
+  labs(title = "K-means Clustering on PCA (Bootstrap Data)", x = "PC1", y = "PC2")
+```
